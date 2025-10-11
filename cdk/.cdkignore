@@ -1,0 +1,5 @@
+# Ignore Visual Studio hidden folder
+.vs
+
+# Ignore Node modules
+node_modules

@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@aws-cdk/aws-lambda-dotnet": "^0.0.6"
+  }
+}
