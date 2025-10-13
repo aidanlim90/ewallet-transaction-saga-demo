@@ -9,12 +9,6 @@ namespace Ewallet.CheckSenderWalletBalanceFunction;
 
 public class Function
 {
-
-    /// <summary>
-    /// The main entry point for the Lambda function. The main function is called once during the Lambda init phase. It
-    /// initializes the .NET Lambda runtime client passing in the function handler to invoke for each Lambda event and
-    /// the JSON serializer to use for converting Lambda JSON format to the .NET types.
-    /// </summary>
     public static async Task Main()
     {
         Func<CheckSenderWalletBalanceRequest , ILambdaContext, Task<CheckSenderWalletBalanceResponse>> handler = CheckSenderWalletBalanceHandler;
@@ -48,7 +42,9 @@ public class Function
             throw new InsufficientBalanceException($"Insufficient funds: balance={account.Balance}, required={request.Amount}");
         }
 
-        return new CheckSenderWalletBalanceResponse(true, ResponseCode.Success);
+        context.Logger.LogInformation($"Sufficient funds: balance={account.Balance}, required={request.Amount}");
+
+        return new CheckSenderWalletBalanceResponse(account.Id, request.ReceiverUserId, request.Amount);
     }
 }
 
@@ -64,10 +60,14 @@ public partial class LambdaFunctionJsonSerializerContext : JsonSerializerContext
 
 public sealed record CheckSenderWalletBalanceRequest(
     string SenderUserId,
+    string ReceiverUserId,
     decimal Amount
 );
 
-public sealed record CheckSenderWalletBalanceResponse(bool IsSufficient, string ResponseCode);
+public sealed record CheckSenderWalletBalanceResponse(
+    string SenderAccountId,
+    string ReceiverUserId,
+    decimal Amount);
 
 public sealed class Account
 {
@@ -83,21 +83,20 @@ public sealed class Account
 }
 
 
-public static class ResponseCode
+public static class ErrorCode
 {
-    public const string Success = "SUCCESS";
-    public const string FailedInsufficient = "FAILED.INSUFFICIENT";
-    public const string FailedAccountNotFound = "FAILED.ACCOUNT_NOT_FOUND";
+    public const string FailedInsufficient = "FAILED.CHECK_SENDER.INSUFFICIENT";
+    public const string FailedAccountNotFound = "FAILED.CHECK_SENDER.ACCOUNT_NOT_FOUND";
 }
 
 public class InsufficientBalanceException : Exception
 {
-    public readonly string ErrorCode = ResponseCode.FailedInsufficient;
+    public readonly string ErrorCode = CheckSenderWalletBalanceFunction.ErrorCode.FailedInsufficient;
     public InsufficientBalanceException(string message) : base(message) { }
 }
 
 public class AccountNotFoundException : Exception
 {
-    public readonly string ErrorCode = ResponseCode.FailedAccountNotFound;
+    public readonly string ErrorCode = CheckSenderWalletBalanceFunction.ErrorCode.FailedAccountNotFound;
     public AccountNotFoundException(string message) : base(message) { }
 }

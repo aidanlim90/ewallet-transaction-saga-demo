@@ -14,7 +14,7 @@
 		This will greatly reduce the final executable's size.-->
 		<StripSymbols>true</StripSymbols>
     <InvariantGlobalization>true</InvariantGlobalization>
-	<InterceptorsPreviewNamespaces>$(InterceptorsPreviewNamespaces);Dapper.AOT</InterceptorsPreviewNamespaces>
+	  <InterceptorsPreviewNamespaces>$(InterceptorsPreviewNamespaces);Dapper.AOT</InterceptorsPreviewNamespaces>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Amazon.Lambda.Core" Version="2.2.0" />

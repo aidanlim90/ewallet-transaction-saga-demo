@@ -21,18 +21,18 @@ Resources:
       MemorySize: 512
       Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
         Variables:
-          DB_CONNECTION_STRING: Host=cdkstack-testpostgresb65b46d7-mph937argjxn.cynu8emmgbud.us-east-1.rds.amazonaws.com;Database=EwalletDb;Username=testuser;Password=EW9Ou7r1FfmnptO57w7FOAByapNs3YOI;Port=5432
+          DB_CONNECTION_STRING: Host=cdkstack-testpostgresb65b46d7-amnekgrygp8s.cynu8emmgbud.us-east-1.rds.amazonaws.com;Database=EwalletDb;Username=testuser;Password=rK2Yi7deyrtrpSD3cGAESWdRPK7gaNMq;Port=5432
       Events:
-        HelloWorldAot:
+        CheckSenderWalletBalanceEvent:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
-            Path: /hello
+            Path: /balance/check
             Method: get
 
-  SuccessFunction:
+  DebitSenderWalletBalanceFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      CodeUri: ./src/Success/
+      CodeUri: ./src/Ewallet.DebitSenderWalletBalanceFunction/
       Handler: bootstrap
       Runtime: dotnet8
       Architectures:
@@ -40,12 +40,12 @@ Resources:
       MemorySize: 512
       Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
         Variables:
-          PARAM1: VALUE
+          DB_CONNECTION_STRING: Host=cdkstack-testpostgresb65b46d7-amnekgrygp8s.cynu8emmgbud.us-east-1.rds.amazonaws.com;Database=EwalletDb;Username=testuser;Password=rK2Yi7deyrtrpSD3cGAESWdRPK7gaNMq;Port=5432
       Events:
-        Success:
+        DebitSenderWalletBalanceEvent:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
-            Path: /hello2
+            Path: /balance/debit
             Method: get
 
   FailFunction:

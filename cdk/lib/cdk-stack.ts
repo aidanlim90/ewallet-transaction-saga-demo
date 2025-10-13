@@ -67,6 +67,7 @@ export class CdkStack extends cdk.Stack {
     const username = dbSecret.secretValueFromJson('username').unsafeUnwrap();
     const password = dbSecret.secretValueFromJson('password').unsafeUnwrap();
     const dbConnectionString = `Host=${db.dbInstanceEndpointAddress};Database=EwalletDb;Username=${username};Password=${password};Port=${db.dbInstanceEndpointPort}`;
+   
     const checkSenderWalletBalanceFunction = new dotnet.DotNetFunction(this, 'CheckSenderWalletBalanceFunction', {
       projectDir: '../src/Ewallet.CheckSenderWalletBalanceFunction',
       runtime: lambda.Runtime.PROVIDED_AL2023,
@@ -80,15 +81,14 @@ export class CdkStack extends cdk.Stack {
         DB_CONNECTION_STRING: dbConnectionString,
       },
     });
-
     const checkSenderWalletBalanceFromFunctionArn = lambda.Function.fromFunctionArn(
       this,
       'CheckSenderWalletBalanceFromFunctionArn',
       checkSenderWalletBalanceFunction.functionArn
     );
 
-    const successLambda = new dotnet.DotNetFunction(this, 'SuccessFunction', {
-      projectDir: '../src/Success',
+    const debitSenderWalletBalanceFunction = new dotnet.DotNetFunction(this, 'DebitSenderWalletBalanceFunction', {
+      projectDir: '../src/Ewallet.DebitSenderWalletBalanceFunction',
       runtime: lambda.Runtime.PROVIDED_AL2023,
       bundling: {
         msbuildParameters: ['/p:PublishAot=true'],
@@ -96,12 +96,15 @@ export class CdkStack extends cdk.Stack {
       vpc: vpc,
       architecture: lambda.Architecture.X86_64,
       memorySize: 512,
+      environment: {
+        DB_CONNECTION_STRING: dbConnectionString,
+      },
     });
 
-    const successLambdaReference = lambda.Function.fromFunctionArn(
+    const debitSenderWalletBalanceFunctionArn = lambda.Function.fromFunctionArn(
       this,
-      'SuccessLambda',
-      successLambda.functionArn
+      'DebitSenderWalletBalanceFunctionArn',
+      debitSenderWalletBalanceFunction.functionArn
     );
 
     const failLambda = new dotnet.DotNetFunction(this, 'FailFunction', {
@@ -123,11 +126,11 @@ export class CdkStack extends cdk.Stack {
 
     const checkSenderWalletBalanceTask = new tasks.LambdaInvoke(this, 'Check Sender Wallet Balance Task', {
       lambdaFunction: checkSenderWalletBalanceFromFunctionArn,
-      outputPath: '$.Payload', // only keep the result payload
+      outputPath: '$.Payload',
     });
 
-     const successTask = new tasks.LambdaInvoke(this, 'Run Success Lambda', {
-      lambdaFunction: successLambdaReference,
+    const debitSenderWalletBalanceTask = new tasks.LambdaInvoke(this, 'Debit Sender Wallet Balance Task', {
+      lambdaFunction: debitSenderWalletBalanceFunctionArn,
       outputPath: '$.Payload',
     });
 
@@ -138,12 +141,11 @@ export class CdkStack extends cdk.Stack {
 
     const definition = checkSenderWalletBalanceTask
       .addCatch(failTask, { resultPath: "$.error" })
-      .next(successTask);
+      .next(debitSenderWalletBalanceTask.addCatch(failTask, { resultPath: "$.error" }));
 
     new sfn.StateMachine(this, "EwalletTransactionSagaOrchestration", {
       definitionBody: sfn.DefinitionBody.fromChainable(definition),
       timeout: cdk.Duration.minutes(5),
     });
-    // new cdk.CfnOutput(this, "FunctionName", { value: helloLambda.functionName });
   }
 }

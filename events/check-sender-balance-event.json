@@ -1,4 +1,5 @@
 {
     "SenderUserId": "user_002",
-    "Amount": 5320.00
+    "ReceiverUserId": "user_001",
+    "Amount": 100.00
 }
