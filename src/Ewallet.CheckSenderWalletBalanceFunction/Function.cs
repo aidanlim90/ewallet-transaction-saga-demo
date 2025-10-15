@@ -2,8 +2,8 @@ using System.Text.Json.Serialization;
 using Amazon.Lambda.Core;
 using Amazon.Lambda.RuntimeSupport;
 using Amazon.Lambda.Serialization.SystemTextJson;
-using Npgsql;
 using Dapper;
+using Npgsql;
 
 namespace Ewallet.CheckSenderWalletBalanceFunction;
 
@@ -11,40 +11,70 @@ public class Function
 {
     public static async Task Main()
     {
-        Func<CheckSenderWalletBalanceRequest , ILambdaContext, Task<CheckSenderWalletBalanceResponse>> handler = CheckSenderWalletBalanceHandler;
-        await LambdaBootstrapBuilder.Create(handler, new SourceGeneratorLambdaJsonSerializer<LambdaFunctionJsonSerializerContext>())
+        Func<
+            CheckSenderWalletBalanceRequest,
+            ILambdaContext,
+            Task<CheckSenderWalletBalanceResponse>
+        > handler = CheckSenderWalletBalanceHandler;
+        await LambdaBootstrapBuilder
+            .Create(
+                handler,
+                new SourceGeneratorLambdaJsonSerializer<LambdaFunctionJsonSerializerContext>()
+            )
             .Build()
             .RunAsync();
     }
 
-    public static async Task<CheckSenderWalletBalanceResponse> CheckSenderWalletBalanceHandler(CheckSenderWalletBalanceRequest request, ILambdaContext context)
+    public static async Task<CheckSenderWalletBalanceResponse> CheckSenderWalletBalanceHandler(
+        CheckSenderWalletBalanceRequest request,
+        ILambdaContext context
+    )
     {
         var connectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING");
         if (string.IsNullOrEmpty(connectionString))
-            throw new InvalidOperationException("Missing DB_CONNECTION_STRING environment variable.");
+            throw new InvalidOperationException(
+                "Missing DB_CONNECTION_STRING environment variable."
+            );
 
         await using var connection = new NpgsqlConnection(connectionString);
-        const string sql = @"
+        const string sql =
+            @"
             SELECT id, user_id, balance
             FROM wallet.account
             WHERE user_id = @UserId;
         ";
-        var account = await connection.QuerySingleOrDefaultAsync<Account>(sql, new { UserId = request.SenderUserId });
+        var account = await connection.QuerySingleOrDefaultAsync<Account>(
+            sql,
+            new { UserId = request.SenderUserId }
+        );
         if (account == null)
         {
             context.Logger.LogError($"No account found for sender: {request.SenderUserId}");
-            throw new AccountNotFoundException($"No account found for sender: {request.SenderUserId} not found");
+            throw new AccountNotFoundException(
+                $"No account found for sender: {request.SenderUserId} not found"
+            );
         }
 
         if (account.Balance < request.Amount)
         {
-            context.Logger.LogError($"Insufficient funds: balance={account.Balance}, required={request.Amount}");
-            throw new InsufficientBalanceException($"Insufficient funds: balance={account.Balance}, required={request.Amount}");
+            context.Logger.LogError(
+                $"Insufficient funds: balance={account.Balance}, required={request.Amount}"
+            );
+            throw new InsufficientBalanceException(
+                $"Insufficient funds: balance={account.Balance}, required={request.Amount}"
+            );
         }
 
-        context.Logger.LogInformation($"Sufficient funds: balance={account.Balance}, required={request.Amount}");
+        context.Logger.LogInformation(
+            $"Sufficient funds: balance={account.Balance}, required={request.Amount}"
+        );
 
-        return new CheckSenderWalletBalanceResponse(account.Id, request.ReceiverUserId, request.Amount);
+        return new CheckSenderWalletBalanceResponse(
+            request.TransactionId,
+            account.Id,
+            request.ReceiverUserId,
+            request.Amount
+        );
     }
 }
 
@@ -59,15 +89,18 @@ public partial class LambdaFunctionJsonSerializerContext : JsonSerializerContext
 }
 
 public sealed record CheckSenderWalletBalanceRequest(
+    string TransactionId,
     string SenderUserId,
     string ReceiverUserId,
     decimal Amount
 );
 
 public sealed record CheckSenderWalletBalanceResponse(
+    string TransactionId,
     string SenderAccountId,
     string ReceiverUserId,
-    decimal Amount);
+    decimal Amount
+);
 
 public sealed class Account
 {
@@ -77,11 +110,10 @@ public sealed class Account
 
     public decimal Balance { get; set; } = 0.0m;
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedAt { get; set; } = DateTime.UtcNow;
 
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTime.UtcNow;
 }
-
 
 public static class ErrorCode
 {
@@ -91,12 +123,20 @@ public static class ErrorCode
 
 public class InsufficientBalanceException : Exception
 {
-    public readonly string ErrorCode = CheckSenderWalletBalanceFunction.ErrorCode.FailedInsufficient;
-    public InsufficientBalanceException(string message) : base(message) { }
+    public readonly string ErrorCode = CheckSenderWalletBalanceFunction
+        .ErrorCode
+        .FailedInsufficient;
+
+    public InsufficientBalanceException(string message)
+        : base(message) { }
 }
 
 public class AccountNotFoundException : Exception
 {
-    public readonly string ErrorCode = CheckSenderWalletBalanceFunction.ErrorCode.FailedAccountNotFound;
-    public AccountNotFoundException(string message) : base(message) { }
+    public readonly string ErrorCode = CheckSenderWalletBalanceFunction
+        .ErrorCode
+        .FailedAccountNotFound;
+
+    public AccountNotFoundException(string message)
+        : base(message) { }
 }

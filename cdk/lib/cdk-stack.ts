@@ -129,19 +129,32 @@ export class CdkStack extends cdk.Stack {
       outputPath: '$.Payload',
     });
 
-    const debitSenderWalletBalanceTask = new tasks.LambdaInvoke(this, 'Debit Sender Wallet Balance Task', {
-      lambdaFunction: debitSenderWalletBalanceFunctionArn,
-      outputPath: '$.Payload',
-    });
-
     const failTask = new tasks.LambdaInvoke(this, 'Run Fail Lambda', {
       lambdaFunction: failLambdaReference,
       outputPath: '$.Payload',
     });
 
+    const debitSenderWalletBalanceTask = new tasks.LambdaInvoke(this, 'Debit Sender Wallet Balance Task', {
+      lambdaFunction: debitSenderWalletBalanceFunctionArn,
+      outputPath: '$.Payload',
+    })
+    .addRetry({
+      errors: ['AccountNotFoundException', 'DuplicateTransactionException'],
+      maxAttempts: 0,
+    })
+    .addRetry({
+      maxAttempts: 3,
+      backoffRate: 2.0,
+      interval: cdk.Duration.seconds(2),
+      errors: ['States.ALL'],
+    })
+    .addCatch(failTask, {
+      resultPath: '$.error',
+    });
+    
     const definition = checkSenderWalletBalanceTask
       .addCatch(failTask, { resultPath: "$.error" })
-      .next(debitSenderWalletBalanceTask.addCatch(failTask, { resultPath: "$.error" }));
+      .next(debitSenderWalletBalanceTask);
 
     new sfn.StateMachine(this, "EwalletTransactionSagaOrchestration", {
       definitionBody: sfn.DefinitionBody.fromChainable(definition),

@@ -2,8 +2,8 @@ using System.Text.Json.Serialization;
 using Amazon.Lambda.Core;
 using Amazon.Lambda.RuntimeSupport;
 using Amazon.Lambda.Serialization.SystemTextJson;
-using Npgsql;
 using Dapper;
+using Npgsql;
 
 namespace Ewallet.DebitSenderWalletBalanceFunction;
 
@@ -11,56 +11,132 @@ public class Function
 {
     private static async Task Main()
     {
-        Func<DebitSenderWalletBalanceRequest, ILambdaContext, Task<DebitSenderWalletBalanceResponse>> handler = DebitSenderWalletBalanceHandler;
-        await LambdaBootstrapBuilder.Create(handler, new SourceGeneratorLambdaJsonSerializer<LambdaFunctionJsonSerializerContext>())
+        Func<
+            DebitSenderWalletBalanceRequest,
+            ILambdaContext,
+            Task<DebitSenderWalletBalanceResponse>
+        > handler = DebitSenderWalletBalanceHandler;
+        await LambdaBootstrapBuilder
+            .Create(
+                handler,
+                new SourceGeneratorLambdaJsonSerializer<LambdaFunctionJsonSerializerContext>()
+            )
             .Build()
             .RunAsync();
     }
 
-    public static async Task<DebitSenderWalletBalanceResponse> DebitSenderWalletBalanceHandler(DebitSenderWalletBalanceRequest request, ILambdaContext context)
+    public static async Task<DebitSenderWalletBalanceResponse> DebitSenderWalletBalanceHandler(
+        DebitSenderWalletBalanceRequest request,
+        ILambdaContext context
+    )
     {
         try
         {
             var connectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING");
             if (string.IsNullOrEmpty(connectionString))
-                throw new InvalidOperationException("Missing DB_CONNECTION_STRING environment variable.");
+                throw new InvalidOperationException(
+                    "Missing DB_CONNECTION_STRING environment variable."
+                );
 
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync();
             await using var transaction = await connection.BeginTransactionAsync();
-            const string selectAccountForUpdateSql = @"
+            const string insertInboxSql =
+                @"
+                INSERT INTO wallet.inbox (
+                    transaction_id,
+                    type,
+                    amount,
+                    created_at,
+                    updated_at
+                )
+                VALUES (
+                    @TransactionId,
+                    @Type,
+                    @Amount,
+                    NOW() AT TIME ZONE 'UTC',
+                    NOW() AT TIME ZONE 'UTC'
+                );
+            ";
+
+            try
+            {
+                await connection.ExecuteAsync(
+                    insertInboxSql,
+                    new
+                    {
+                        TransactionId = request.TransactionId,
+                        Type = "SENDER",
+                        Amount = request.Amount,
+                    },
+                    transaction
+                );
+            }
+            catch (PostgresException ex) when (ex.SqlState == "23505")
+            {
+                context.Logger.LogError($"Duplicate transaction detected: {request.TransactionId}");
+                throw new DuplicateTransactionException(
+                    $"Duplicate transaction_id {request.TransactionId} detected. Step Function retry suppressed."
+                );
+            }
+
+            const string selectAccountForUpdateSql =
+                @"
                 SELECT id, user_id, balance FROM wallet.account WHERE id = @SenderAccountId FOR UPDATE;
             ";
             var account = await connection.QuerySingleOrDefaultAsync<Account>(
-            selectAccountForUpdateSql,
-            new { SenderAccountId = request.SenderAccountId },
-            transaction);
+                selectAccountForUpdateSql,
+                new { SenderAccountId = request.SenderAccountId },
+                transaction
+            );
 
             if (account == null)
             {
                 context.Logger.LogError($"No account found for sender: {request.SenderAccountId}");
-                throw new AccountNotFoundException($"No account found for sender: {request.SenderAccountId} not found");
+                throw new AccountNotFoundException(
+                    $"No account found for sender: {request.SenderAccountId} not found"
+                );
             }
 
-            var updateWalletBalanceSql = @"
+            var updateWalletBalanceSql =
+                @"
                 UPDATE wallet.account
                 SET balance = balance - @Amount,
                     updated_at = NOW() AT TIME ZONE 'UTC'
                 WHERE id = @Id;
             ";
             await connection.ExecuteAsync(
-            updateWalletBalanceSql,
-            new { Amount = request.Amount, Id = account.Id },
-            transaction);
+                updateWalletBalanceSql,
+                new { Amount = request.Amount, Id = account.Id },
+                transaction
+            );
 
             await transaction.CommitAsync();
-            context.Logger.LogInformation($"Debited {request.Amount} from sender {request.SenderAccountId}. New balance: {account.Balance - request.Amount}");
-            return new DebitSenderWalletBalanceResponse(request.ReceiverUserId, request.Amount);
+            context.Logger.LogInformation(
+                $"Debited {request.Amount} from sender {request.SenderAccountId}. New balance: {account.Balance - request.Amount}"
+            );
+            return new DebitSenderWalletBalanceResponse(
+                request.TransactionId,
+                request.ReceiverUserId,
+                request.Amount
+            );
+        }
+        catch (AccountNotFoundException)
+        {
+            throw;
+        }
+        catch (DuplicateTransactionException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            context.Logger.LogError($"Unexpected error debiting sender {request.SenderAccountId}: {ex.Message}");
-            throw new UnexpectedException($"Unexpected error debiting sender {request.SenderAccountId}: {ex.Message}");
+            context.Logger.LogError(
+                $"Unexpected error debiting sender {request.SenderAccountId}: {ex.Message}"
+            );
+            throw new UnexpectedException(
+                $"Unexpected error debiting sender {request.SenderAccountId}: {ex.Message}"
+            );
         }
     }
 }
@@ -76,14 +152,17 @@ public partial class LambdaFunctionJsonSerializerContext : JsonSerializerContext
 }
 
 public sealed record DebitSenderWalletBalanceRequest(
+    string TransactionId,
     string SenderAccountId,
     string ReceiverUserId,
     decimal Amount
 );
 
 public sealed record DebitSenderWalletBalanceResponse(
+    string TransactionId,
     string ReceiverUserId,
-    decimal Amount);
+    decimal Amount
+);
 
 public sealed class Account
 {
@@ -93,24 +172,46 @@ public sealed class Account
 
     public decimal Balance { get; set; } = 0.0m;
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedAt { get; set; } = DateTime.UtcNow;
 
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTime.UtcNow;
 }
+
+#region Error Codes and Exceptions
 
 public static class ErrorCode
 {
     public const string Unexpected = "FAILED.DEBIT_SENDER";
     public const string FailedAccountNotFound = "FAILED.DEBIT_SENDER.ACCOUNT_NOT_FOUND";
+    public const string DuplicateTransaction = "FAILED.DEBIT_SENDER.DUPLICATE";
 }
 
 public class AccountNotFoundException : Exception
 {
-    public readonly string ErrorCode = DebitSenderWalletBalanceFunction.ErrorCode.FailedAccountNotFound;
-    public AccountNotFoundException(string message) : base(message) { }
+    public readonly string ErrorCode = DebitSenderWalletBalanceFunction
+        .ErrorCode
+        .FailedAccountNotFound;
+
+    public AccountNotFoundException(string message)
+        : base(message) { }
 }
+
+public class DuplicateTransactionException : Exception
+{
+    public readonly string ErrorCode = DebitSenderWalletBalanceFunction
+        .ErrorCode
+        .DuplicateTransaction;
+
+    public DuplicateTransactionException(string message)
+        : base(message) { }
+}
+
 public class UnexpectedException : Exception
 {
     public readonly string ErrorCode = DebitSenderWalletBalanceFunction.ErrorCode.Unexpected;
-    public UnexpectedException(string message) : base(message) { }
+
+    public UnexpectedException(string message)
+        : base(message) { }
 }
+
+#endregion
