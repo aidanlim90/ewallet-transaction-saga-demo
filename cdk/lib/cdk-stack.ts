@@ -7,6 +7,10 @@ import * as sfn from "aws-cdk-lib/aws-stepfunctions";
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as pipes from 'aws-cdk-lib/aws-pipes';
+import * as iam from "aws-cdk-lib/aws-iam";
+import * as kms from "aws-cdk-lib/aws-kms";
 
 export class CdkStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -41,18 +45,18 @@ export class CdkStack extends cdk.Stack {
     });
 
     // RDS instance
-    const db = new rds.DatabaseInstance(this, 'TestPostgres', {
+    const db = new rds.DatabaseInstance(this, 'EwalletDb', {
       engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_16 }),
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.MICRO), // cheapest instance
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       credentials: rds.Credentials.fromSecret(dbSecret),
-      allocatedStorage: 20, // minimum
+      allocatedStorage: 20,
       maxAllocatedStorage: 50,
-      multiAz: false, // single AZ
+      multiAz: false,
       securityGroups: [rdsSecurityGroup],
       publiclyAccessible: true, // for local testing
-      removalPolicy: cdk.RemovalPolicy.DESTROY, // delete when stack is destroyed
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
       deletionProtection: false,
     });
 
@@ -68,24 +72,35 @@ export class CdkStack extends cdk.Stack {
     const password = dbSecret.secretValueFromJson('password').unsafeUnwrap();
     const dbConnectionString = `Host=${db.dbInstanceEndpointAddress};Database=EwalletDb;Username=${username};Password=${password};Port=${db.dbInstanceEndpointPort}`;
    
-    const checkSenderWalletBalanceFunction = new dotnet.DotNetFunction(this, 'CheckSenderWalletBalanceFunction', {
-      projectDir: '../src/Ewallet.CheckSenderWalletBalanceFunction',
+    const ewalletSingleTable = new dynamodb.Table(this, 'Ewallet', {
+      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PROVISIONED,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      stream: dynamodb.StreamViewType.NEW_IMAGE, // enable stream
+    });
+
+    vpc.addGatewayEndpoint('DynamoDbEndpoint', {
+      service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
+    });
+
+    new cdk.CfnOutput(this, 'EwalletSingleTableName', {
+      value: ewalletSingleTable.tableName,
+    });
+
+    const createTransactionFunction = new dotnet.DotNetFunction(this, 'CreateTransactionFunction', {
+      projectDir: '../src/Ewallet.CreateTransactionFunction',
       runtime: lambda.Runtime.PROVIDED_AL2023,
-      bundling: {
-        msbuildParameters: ['/p:PublishAot=true'],
-      },
-      vpc: vpc,
+      bundling: { msbuildParameters: ['/p:PublishAot=true'] },
+      vpc,
       architecture: lambda.Architecture.X86_64,
       memorySize: 512,
       environment: {
-        DB_CONNECTION_STRING: dbConnectionString,
+        EWALLET_TABLE: ewalletSingleTable.tableName,
       },
     });
-    const checkSenderWalletBalanceFromFunctionArn = lambda.Function.fromFunctionArn(
-      this,
-      'CheckSenderWalletBalanceFromFunctionArn',
-      checkSenderWalletBalanceFunction.functionArn
-    );
+
+    ewalletSingleTable.grantWriteData(createTransactionFunction);
 
     const debitSenderWalletBalanceFunction = new dotnet.DotNetFunction(this, 'DebitSenderWalletBalanceFunction', {
       projectDir: '../src/Ewallet.DebitSenderWalletBalanceFunction',
@@ -124,11 +139,6 @@ export class CdkStack extends cdk.Stack {
       failLambda.functionArn
     );
 
-    const checkSenderWalletBalanceTask = new tasks.LambdaInvoke(this, 'Check Sender Wallet Balance Task', {
-      lambdaFunction: checkSenderWalletBalanceFromFunctionArn,
-      outputPath: '$.Payload',
-    });
-
     const failTask = new tasks.LambdaInvoke(this, 'Run Fail Lambda', {
       lambdaFunction: failLambdaReference,
       outputPath: '$.Payload',
@@ -136,10 +146,11 @@ export class CdkStack extends cdk.Stack {
 
     const debitSenderWalletBalanceTask = new tasks.LambdaInvoke(this, 'Debit Sender Wallet Balance Task', {
       lambdaFunction: debitSenderWalletBalanceFunctionArn,
+      inputPath: '$[0]',
       outputPath: '$.Payload',
     })
     .addRetry({
-      errors: ['AccountNotFoundException', 'DuplicateTransactionException'],
+      errors: ['AccountNotFoundException', 'DuplicateTransactionException', 'InsufficientBalanceException', 'InvalidOperationException', 'ArgumentException'],
       maxAttempts: 0,
     })
     .addRetry({
@@ -152,13 +163,83 @@ export class CdkStack extends cdk.Stack {
       resultPath: '$.error',
     });
     
-    const definition = checkSenderWalletBalanceTask
-      .addCatch(failTask, { resultPath: "$.error" })
-      .next(debitSenderWalletBalanceTask);
+    const definition = debitSenderWalletBalanceTask;
 
-    new sfn.StateMachine(this, "EwalletTransactionSagaOrchestration", {
+    const transactionSaga =new sfn.StateMachine(this, "EwalletTransactionSagaOrchestration", {
       definitionBody: sfn.DefinitionBody.fromChainable(definition),
       timeout: cdk.Duration.minutes(5),
+    });
+
+    const pipeRole = new iam.Role(this, "DdbStreamPipeRole", {
+      assumedBy: new iam.ServicePrincipal("pipes.amazonaws.com"),
+    });
+
+    // Allow reading the stream
+    pipeRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["dynamodb:DescribeStream", "dynamodb:GetRecords", "dynamodb:GetShardIterator", "dynamodb:ListStreams"],
+        resources: [ewalletSingleTable.tableStreamArn!],
+      })
+    );
+
+    // Allow starting Step Function execution
+    pipeRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["states:StartExecution", "states:StartSyncExecution"],
+        resources: [transactionSaga.stateMachineArn],
+      })
+    );
+
+    // Also allow logs if required (CloudWatch)
+    pipeRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["logs:CreateLogStream", "logs:CreateLogGroup", "logs:PutLogEvents"],
+        resources: ["*"],
+      })
+    );
+
+    // --------------------------
+    // Create the Pipe (CfnPipe) connecting the DynamoDB Stream -> StepFunction
+    // --------------------------
+    // Note: use PascalCase CFN keys inside the nested SourceParameters/TargetParameters object.
+    new pipes.CfnPipe(this, "DdbStreamToStepFnPipe", {
+      name: `${this.stackName}-DdbStreamToStepFnPipe`,
+      roleArn: pipeRole.roleArn,
+      source: ewalletSingleTable.tableStreamArn!,
+      sourceParameters: {
+        // CFN expects DynamoDBStreamParameters (case-sensitive)
+        dynamoDbStreamParameters: {
+          startingPosition: "LATEST",
+          batchSize: 1
+        },
+        filterCriteria: {
+          filters: [
+          {
+            pattern: JSON.stringify({
+              eventName: ['INSERT'],
+              "dynamodb": {
+                "NewImage": {
+                  "PK": { "S": [{ "prefix": "TRANSACTION#" }] }
+                }
+              }
+            })
+          }
+      ]
+    }
+      },
+      target: transactionSaga.stateMachineArn,
+      targetParameters: {
+        // CFN expects StepFunctionStateMachineParameters (case-sensitive)
+        stepFunctionStateMachineParameters: {
+          invocationType: "FIRE_AND_FORGET"
+        },
+        inputTemplate: JSON.stringify({
+          TransactionId: "<$.dynamodb.NewImage.PK.S>",
+          SenderUserId: "<$.dynamodb.NewImage.SenderId.S>",
+          ReceiverUserId: "<$.dynamodb.NewImage.ReceiverId.S>",
+          Amount: "<$.dynamodb.NewImage.Amount.N>"
+        })
+      }
     });
   }
 }

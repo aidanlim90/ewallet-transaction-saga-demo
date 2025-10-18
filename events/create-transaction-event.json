@@ -1,0 +1,8 @@
+{
+  "IdempotentKey": "12345",
+  "SenderId": "user_001",
+  "ReceiverId": "user_002",
+  "Amount": 100.50,
+  "Type": "SEND",
+  "Details": "Payment for services rendered"
+}

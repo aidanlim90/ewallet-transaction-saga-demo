@@ -1,5 +1,6 @@
-{
-    "SenderAccountId": "acc_002",
+[{
+    "TransactionId": "txn_123456",
+    "SenderUserId": "user_002",
     "ReceiverUserId": "user_001",
-    "Amount": 5320.00
-}
+    "Amount": "5320.00"
+}]

@@ -14,15 +14,19 @@
 		This will greatly reduce the final executable's size.-->
 		<StripSymbols>true</StripSymbols>
     <InvariantGlobalization>true</InvariantGlobalization>
-	  <InterceptorsPreviewNamespaces>$(InterceptorsPreviewNamespaces);Dapper.AOT</InterceptorsPreviewNamespaces>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Amazon.Lambda.Core" Version="2.2.0" />
     <PackageReference Include="Amazon.Lambda.RuntimeSupport" Version="1.10.0" />
     <PackageReference Include="Amazon.Lambda.Serialization.SystemTextJson" Version="2.4.0" />
     <PackageReference Include="Amazon.Lambda.APIGatewayEvents" Version="2.7.0" />
-    <PackageReference Include="Dapper" Version="2.1.66" />
-    <PackageReference Include="Dapper.AOT" Version="1.0.48" />
-    <PackageReference Include="Npgsql" Version="8.0.8" />
+    <PackageReference Include="AWSSDK.DynamoDBv2" Version="3.7.302.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <TrimmerRootAssembly Include="Amazon.Lambda.Core" />
+    <TrimmerRootAssembly Include="Amazon.Lambda.RuntimeSupport" />
+    <TrimmerRootAssembly Include="Amazon.Lambda.Serialization.SystemTextJson" />
+    <TrimmerRootAssembly Include="AWSSDK.DynamoDBv2" />
   </ItemGroup>
 </Project>

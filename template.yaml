@@ -29,10 +29,10 @@ Resources:
             Path: /balance/check
             Method: get
 
-  DebitSenderWalletBalanceFunction:
+  CreateTransactionFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      CodeUri: ./src/Ewallet.DebitSenderWalletBalanceFunction/
+      CodeUri: ./src/Ewallet.CreateTransactionFunction/
       Handler: bootstrap
       Runtime: dotnet8
       Architectures:
@@ -40,13 +40,13 @@ Resources:
       MemorySize: 512
       Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
         Variables:
-          DB_CONNECTION_STRING: Host=cdkstack-testpostgresb65b46d7-amnekgrygp8s.cynu8emmgbud.us-east-1.rds.amazonaws.com;Database=EwalletDb;Username=testuser;Password=rK2Yi7deyrtrpSD3cGAESWdRPK7gaNMq;Port=5432
+          DYNAMODB_TABLE_NAME: Ewallet
       Events:
-        DebitSenderWalletBalanceEvent:
+        CreateTransactionEvent:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
-            Path: /balance/debit
-            Method: get
+            Path: /transaction/create
+            Method: post
 
   FailFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction

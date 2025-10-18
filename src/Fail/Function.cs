@@ -1,10 +1,4 @@
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Net.Http;
-using System.Text.Json;
 using System.Text.Json.Serialization;
-
 using Amazon.Lambda.Core;
 using Amazon.Lambda.RuntimeSupport;
 using Amazon.Lambda.Serialization.SystemTextJson;
@@ -13,7 +7,6 @@ namespace HelloWorldAot;
 
 public class Function
 {
-
     /// <summary>
     /// The main entry point for the Lambda function. The main function is called once during the Lambda init phase. It
     /// initializes the .NET Lambda runtime client passing in the function handler to invoke for each Lambda event and
@@ -22,12 +15,19 @@ public class Function
     private static async Task Main()
     {
         Func<Dictionary<string, object>, ILambdaContext, Task<string>> handler = FunctionHandler;
-        await LambdaBootstrapBuilder.Create(handler, new SourceGeneratorLambdaJsonSerializer<LambdaFunctionJsonSerializerContext>())
+        await LambdaBootstrapBuilder
+            .Create(
+                handler,
+                new SourceGeneratorLambdaJsonSerializer<LambdaFunctionJsonSerializerContext>()
+            )
             .Build()
             .RunAsync();
     }
 
-    public static Task<string> FunctionHandler(Dictionary<string, object> input, ILambdaContext context)
+    public static Task<string> FunctionHandler(
+        Dictionary<string, object> input,
+        ILambdaContext context
+    )
     {
         Console.WriteLine("Fail Lambda triggered — performing compensation...");
         return Task.FromResult("Compensation done with code 2");
