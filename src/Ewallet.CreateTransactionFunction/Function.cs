@@ -47,7 +47,7 @@ public class Function
         var transactionItem = new Dictionary<string, AttributeValue>
         {
             ["PK"] = new AttributeValue { S = transactionId },
-            ["SK"] = new AttributeValue { S = now },
+            ["SK"] = new AttributeValue { S = request.SenderId },
             ["IdempotentKey"] = new AttributeValue { S = idempotentPk },
             ["SenderId"] = new AttributeValue { S = request.SenderId },
             ["ReceiverId"] = new AttributeValue { S = request.ReceiverId },
@@ -99,17 +99,15 @@ public class Function
             context.Logger.LogInformation(
                 $"Duplicate idempotent key {request.IdempotentKey}, skipping insert."
             );
-            return new CreateTransactionResponse(
-                transactionId,
-                "DUPLICATE",
-                $"Transaction for idempotent key {request.IdempotentKey} already exists."
+            throw new DuplicateTransactionException(
+                $"Duplicate idempotent key {request.IdempotentKey}, skipping insert."
             );
         }
         catch (Exception ex)
         {
             var wholeMessage = ex.ToString();
             context.Logger.LogError($"Failed to create transaction: {wholeMessage}");
-            return new CreateTransactionResponse(transactionId, "FAILED", $"Error: {wholeMessage}");
+            throw new UnexpectedException($"Failed to create transaction: {ex.Message}");
         }
     }
 }
@@ -131,4 +129,25 @@ public sealed record CreateTransactionRequest(
 
 public sealed record CreateTransactionResponse(string TransactionId, string Result, string Message);
 
+public static class ErrorCode
+{
+    public const string Unexpected = "FAILED.DEBIT_SENDER";
+    public const string DuplicateTransaction = "FAILED.CREATE_TRANSACTION.DUPLICATE_TRANSACTION";
+}
+
+public class DuplicateTransactionException : Exception
+{
+    public readonly string ErrorCode = CreateTransactionFunction.ErrorCode.DuplicateTransaction;
+
+    public DuplicateTransactionException(string message)
+        : base(message) { }
+}
+
+public class UnexpectedException : Exception
+{
+    public readonly string ErrorCode = CreateTransactionFunction.ErrorCode.Unexpected;
+
+    public UnexpectedException(string message)
+        : base(message) { }
+}
 #endregion

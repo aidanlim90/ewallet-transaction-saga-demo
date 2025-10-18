@@ -5,17 +5,17 @@ using Amazon.Lambda.Serialization.SystemTextJson;
 using Dapper;
 using Npgsql;
 
-namespace Ewallet.DebitSenderWalletBalanceFunction;
+namespace Ewallet.RefundSenderWalletBalanceFunction;
 
 public class Function
 {
     private static async Task Main()
     {
         Func<
-            DebitSenderWalletBalanceRequest,
+            RefundSenderWalletBalanceRequest,
             ILambdaContext,
-            Task<DebitSenderWalletBalanceResponse>
-        > handler = DebitSenderWalletBalanceHandler;
+            Task<RefundSenderWalletBalanceResponse>
+        > handler = RefundSenderWalletBalanceHandler;
 
         await LambdaBootstrapBuilder
             .Create(
@@ -26,8 +26,8 @@ public class Function
             .RunAsync();
     }
 
-    public static async Task<DebitSenderWalletBalanceResponse> DebitSenderWalletBalanceHandler(
-        DebitSenderWalletBalanceRequest request,
+    public static async Task<RefundSenderWalletBalanceResponse> RefundSenderWalletBalanceHandler(
+        RefundSenderWalletBalanceRequest request,
         ILambdaContext context
     )
     {
@@ -37,11 +37,6 @@ public class Function
                 "Missing DB_CONNECTION_STRING environment variable."
             );
 
-        if (!decimal.TryParse(request.Amount, out var amount))
-        {
-            throw new InvalidAmountType($"Invalid amount value: {request.Amount}");
-        }
-
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync();
 
@@ -49,7 +44,7 @@ public class Function
 
         try
         {
-            // 1️⃣ Insert inbox entry — detect duplicate transactions
+            // 1️⃣ Insert inbox entry — detect duplicate refund transactions
             const string insertInboxSql =
                 @"
                 INSERT INTO wallet.inbox (
@@ -66,16 +61,18 @@ public class Function
                     insertInboxSql,
                     new
                     {
-                        TransactionId = "DEBIT#" + request.TransactionId,
-                        Type = "SENDER",
-                        Amount = -amount,
+                        TransactionId = "REFUND#" + request.TransactionId,
+                        Type = "REFUND_SENDER",
+                        Amount = request.Amount,
                     },
                     transaction
                 );
             }
             catch (PostgresException ex) when (ex.SqlState == "23505")
             {
-                context.Logger.LogError($"Duplicate transaction detected: {request.TransactionId}");
+                context.Logger.LogError(
+                    $"Duplicate refund transaction detected: {request.TransactionId}"
+                );
                 throw new DuplicateTransactionException(
                     $"Duplicate transaction_id {request.TransactionId} detected. Step Function retry suppressed."
                 );
@@ -102,41 +99,32 @@ public class Function
                 );
             }
 
-            if (account.Balance < amount)
-            {
-                context.Logger.LogError(
-                    $"Insufficient funds: balance={account.Balance}, required={amount}"
-                );
-                throw new InsufficientBalanceException(
-                    $"Insufficient funds: balance={account.Balance}, required={amount}"
-                );
-            }
-
             const string updateBalanceSql =
                 @"
                 UPDATE wallet.account
-                SET balance = balance - @Amount,
+                SET balance = balance + @Amount,
                     updated_at = NOW() AT TIME ZONE 'UTC'
                 WHERE id = @Id;";
 
             await connection.ExecuteAsync(
                 updateBalanceSql,
-                new { Amount = amount, Id = account.Id },
+                new { Amount = request.Amount, Id = account.Id },
                 transaction
             );
 
             await transaction.CommitAsync();
 
             context.Logger.LogInformation(
-                $"Debited {amount} from sender {request.SenderUserId}. New balance: {account.Balance - amount}"
+                $"Refunded {request.Amount} to sender {request.SenderUserId}. New balance: {account.Balance + request.Amount}"
             );
 
-            return new DebitSenderWalletBalanceResponse(
+            return new RefundSenderWalletBalanceResponse(
                 request.TransactionId,
                 request.ReceiverUserId,
                 request.SenderUserId,
-                account.Id,
-                amount
+                request.SenderAccountId,
+                request.ReceiverAccountId,
+                request.Amount
             );
         }
         catch (AccountNotFoundException)
@@ -149,19 +137,14 @@ public class Function
             await transaction.RollbackAsync();
             throw;
         }
-        catch (InsufficientBalanceException)
-        {
-            await transaction.RollbackAsync();
-            throw;
-        }
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
             context.Logger.LogError(
-                $"Unexpected error debiting sender {request.SenderUserId}: {ex.Message}"
+                $"Unexpected error refunding sender {request.SenderUserId}: {ex.Message}"
             );
             throw new UnexpectedException(
-                $"Unexpected error debiting sender {request.SenderUserId}: {ex.Message}"
+                $"Unexpected error refunding sender {request.SenderUserId}: {ex.Message}"
             );
         }
     }
@@ -170,22 +153,25 @@ public class Function
 #region Models & Serialization
 
 [JsonSerializable(typeof(Account))]
-[JsonSerializable(typeof(DebitSenderWalletBalanceRequest))]
-[JsonSerializable(typeof(DebitSenderWalletBalanceResponse))]
+[JsonSerializable(typeof(RefundSenderWalletBalanceRequest))]
+[JsonSerializable(typeof(RefundSenderWalletBalanceResponse))]
 public partial class LambdaFunctionJsonSerializerContext : JsonSerializerContext { }
 
-public sealed record DebitSenderWalletBalanceRequest(
-    string TransactionId,
-    string SenderUserId,
-    string ReceiverUserId,
-    string Amount
-);
-
-public sealed record DebitSenderWalletBalanceResponse(
+public sealed record RefundSenderWalletBalanceRequest(
     string TransactionId,
     string ReceiverUserId,
     string SenderUserId,
     string SenderAccountId,
+    string ReceiverAccountId,
+    decimal Amount
+);
+
+public sealed record RefundSenderWalletBalanceResponse(
+    string TransactionId,
+    string ReceiverUserId,
+    string SenderUserId,
+    string SenderAccountId,
+    string ReceiverAccountId,
     decimal Amount
 );
 
@@ -204,17 +190,16 @@ public sealed class Account
 
 public static class ErrorCode
 {
-    public const string Unexpected = "FAILED.DEBIT_SENDER";
-    public const string FailedAccountNotFound = "FAILED.DEBIT_SENDER.ACCOUNT_NOT_FOUND";
-    public const string DuplicateTransaction = "FAILED.DEBIT_SENDER.DUPLICATE";
-    public const string FailedInsufficient = "FAILED.DEBIT_SENDER.INSUFFICIENT";
-    public const string InvalidConnectionString = "FAILED.DEBIT_SENDER.INVALID_CONNECTION_STRING";
-    public const string InvalidAmountType = "FAILED.DEBIT_SENDER.INVALID_AMOUNT_TYPE";
+    public const string Unexpected = "FAILED.REFUND_SENDER";
+    public const string FailedAccountNotFound = "FAILED.REFUND_SENDER.ACCOUNT_NOT_FOUND";
+    public const string DuplicateTransaction = "FAILED.REFUND_SENDER.DUPLICATE";
+    public const string InvalidConnectionString = "FAILED.REFUND_SENDER.INVALID_CONNECTION_STRING";
+    public const string InvalidAmountType = "FAILED.REFUND_SENDER.INVALID_AMOUNT_TYPE";
 }
 
 public class AccountNotFoundException : Exception
 {
-    public readonly string ErrorCode = DebitSenderWalletBalanceFunction
+    public readonly string ErrorCode = RefundSenderWalletBalanceFunction
         .ErrorCode
         .FailedAccountNotFound;
 
@@ -224,7 +209,7 @@ public class AccountNotFoundException : Exception
 
 public class DuplicateTransactionException : Exception
 {
-    public readonly string ErrorCode = DebitSenderWalletBalanceFunction
+    public readonly string ErrorCode = RefundSenderWalletBalanceFunction
         .ErrorCode
         .DuplicateTransaction;
 
@@ -232,19 +217,9 @@ public class DuplicateTransactionException : Exception
         : base(message) { }
 }
 
-public class InsufficientBalanceException : Exception
-{
-    public readonly string ErrorCode = DebitSenderWalletBalanceFunction
-        .ErrorCode
-        .FailedInsufficient;
-
-    public InsufficientBalanceException(string message)
-        : base(message) { }
-}
-
 public class UnexpectedException : Exception
 {
-    public readonly string ErrorCode = DebitSenderWalletBalanceFunction.ErrorCode.Unexpected;
+    public readonly string ErrorCode = RefundSenderWalletBalanceFunction.ErrorCode.Unexpected;
 
     public UnexpectedException(string message)
         : base(message) { }
@@ -252,7 +227,9 @@ public class UnexpectedException : Exception
 
 public class InvalidAmountType : Exception
 {
-    public readonly string ErrorCode = DebitSenderWalletBalanceFunction.ErrorCode.InvalidAmountType;
+    public readonly string ErrorCode = RefundSenderWalletBalanceFunction
+        .ErrorCode
+        .InvalidAmountType;
 
     public InvalidAmountType(string message)
         : base(message) { }
@@ -260,7 +237,7 @@ public class InvalidAmountType : Exception
 
 public class InvalidConnectionStringException : Exception
 {
-    public readonly string ErrorCode = DebitSenderWalletBalanceFunction
+    public readonly string ErrorCode = RefundSenderWalletBalanceFunction
         .ErrorCode
         .InvalidConnectionString;
 

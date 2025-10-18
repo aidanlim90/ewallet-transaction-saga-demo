@@ -10,10 +10,10 @@ Globals:
     MemorySize: 512
 
 Resources:
-  CheckSenderWalletBalanceFunction:
+  Ewallet.CreditReceiverWalletBalanceFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      CodeUri: ./src/Ewallet.CheckSenderWalletBalanceFunction/
+      CodeUri: ./src/Ewallet.Ewallet.CreditReceiverWalletBalanceFunction/
       Handler: bootstrap
       Runtime: dotnet8
       Architectures:
@@ -48,10 +48,10 @@ Resources:
             Path: /transaction/create
             Method: post
 
-  FailFunction:
+  FailTransactionFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      CodeUri: ./src/Fail/
+      CodeUri: ./src/Ewallet.FailTransactionFunction/
       Handler: bootstrap
       Runtime: dotnet8
       Architectures:
@@ -59,12 +59,12 @@ Resources:
       MemorySize: 512
       Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
         Variables:
-          PARAM1: VALUE
+          DYNAMODB_TABLE_NAME: Ewallet
       Events:
         Success:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
-            Path: /hello3
+            Path: /transaction/fail
             Method: get
 
 Outputs:

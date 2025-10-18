@@ -10,7 +10,7 @@ ON wallet.account (user_id);
 
 CREATE TABLE wallet.inbox (
     transaction_id TEXT PRIMARY KEY,
-    type TEXT NOT NULL CHECK (type IN ('SENDER', 'RECEIVER')),
+    type VARCHAR(100) NOT NULL,
     amount NUMERIC(20,2) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

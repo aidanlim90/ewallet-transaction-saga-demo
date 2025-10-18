@@ -122,8 +122,8 @@ export class CdkStack extends cdk.Stack {
       debitSenderWalletBalanceFunction.functionArn
     );
 
-    const failLambda = new dotnet.DotNetFunction(this, 'FailFunction', {
-      projectDir: '../src/Fail',
+    const processTransactionFunction = new dotnet.DotNetFunction(this, 'ProcessTransactionFunction', {
+      projectDir: '../src/Ewallet.ProcessTransactionFunction',
       runtime: lambda.Runtime.PROVIDED_AL2023,
       bundling: {
         msbuildParameters: ['/p:PublishAot=true'],
@@ -131,26 +131,119 @@ export class CdkStack extends cdk.Stack {
       vpc: vpc,
       architecture: lambda.Architecture.X86_64,
       memorySize: 512,
+      environment: {
+        EWALLET_TABLE: ewalletSingleTable.tableName,
+      },
     });
 
-    const failLambdaReference = lambda.Function.fromFunctionArn(
+    const processTransactionFunctionArn = lambda.Function.fromFunctionArn(
       this,
-      'FailLambda',
-      failLambda.functionArn
+      'ProcessTransactionFunctionArn',
+      processTransactionFunction.functionArn
     );
 
-    const failTask = new tasks.LambdaInvoke(this, 'Run Fail Lambda', {
-      lambdaFunction: failLambdaReference,
+    ewalletSingleTable.grantWriteData(processTransactionFunction);
+
+    const successTransactionFunction = new dotnet.DotNetFunction(this, 'SuccessTransactionFunction', {
+      projectDir: '../src/Ewallet.SuccessTransactionFunction',
+      runtime: lambda.Runtime.PROVIDED_AL2023,
+      bundling: {
+        msbuildParameters: ['/p:PublishAot=true'],
+      },
+      vpc: vpc,
+      architecture: lambda.Architecture.X86_64,
+      memorySize: 512,
+      environment: {
+        EWALLET_TABLE: ewalletSingleTable.tableName,
+      },
+    });
+
+    const successTransactionFunctionArn = lambda.Function.fromFunctionArn(
+      this,
+      'SuccessTransactionFunctionArn',
+      successTransactionFunction.functionArn
+    );
+
+    ewalletSingleTable.grantWriteData(successTransactionFunction);
+
+    const creditReceiverWalletBalanceFunction = new dotnet.DotNetFunction(this, 'CreditReceiverWalletBalanceFunction', {
+      projectDir: '../src/Ewallet.CreditReceiverWalletBalanceFunction',
+      runtime: lambda.Runtime.PROVIDED_AL2023,
+      bundling: {
+        msbuildParameters: ['/p:PublishAot=true'],
+      },
+      vpc: vpc,
+      architecture: lambda.Architecture.X86_64,
+      memorySize: 512,
+      environment: {
+        DB_CONNECTION_STRING: dbConnectionString,
+      },
+    });
+    const creditReceiverWalletBalanceFunctionArn = lambda.Function.fromFunctionArn(
+      this,
+      'CreditReceiverWalletBalanceFunctionArn',
+      creditReceiverWalletBalanceFunction.functionArn
+    );
+
+    const refundSenderWalletBalanceFunction = new dotnet.DotNetFunction(this, 'RefundSenderWalletBalanceFunction', {
+      projectDir: '../src/Ewallet.RefundSenderWalletBalanceFunction',
+      runtime: lambda.Runtime.PROVIDED_AL2023,
+      bundling: {
+        msbuildParameters: ['/p:PublishAot=true'],
+      },
+      vpc: vpc,
+      architecture: lambda.Architecture.X86_64,
+      memorySize: 512,
+      environment: {
+        DB_CONNECTION_STRING: dbConnectionString,
+      },
+    });
+    const refundSenderWalletBalanceFunctionArn = lambda.Function.fromFunctionArn(
+      this,
+      'RefundSenderWalletBalanceFunctionArn',
+      refundSenderWalletBalanceFunction.functionArn
+    );
+
+    const failTransactionFunction = new dotnet.DotNetFunction(this, 'FailTransactionFunction', {
+      projectDir: '../src/Ewallet.FailTransactionFunction',
+      runtime: lambda.Runtime.PROVIDED_AL2023,
+      bundling: {
+        msbuildParameters: ['/p:PublishAot=true'],
+      },
+      vpc: vpc,
+      architecture: lambda.Architecture.X86_64,
+      memorySize: 512,
+      environment: {
+        EWALLET_TABLE: ewalletSingleTable.tableName,
+      },
+    });
+
+    const failTransactionFunctionArn = lambda.Function.fromFunctionArn(
+      this,
+      'FailTransactionFunctionArn',
+      failTransactionFunction.functionArn
+    );
+
+     ewalletSingleTable.grantWriteData(failTransactionFunction);
+
+    const failTransactionTask = new tasks.LambdaInvoke(this, 'Fail Transaction Task', {
+      lambdaFunction: failTransactionFunctionArn,
+      // inputPath: '$[0]',
       outputPath: '$.Payload',
+    })
+    .addRetry({
+      maxAttempts: 3,
+      backoffRate: 2.0,
+      interval: cdk.Duration.seconds(2),
+      errors: ['States.ALL'],
     });
 
     const debitSenderWalletBalanceTask = new tasks.LambdaInvoke(this, 'Debit Sender Wallet Balance Task', {
       lambdaFunction: debitSenderWalletBalanceFunctionArn,
-      inputPath: '$[0]',
       outputPath: '$.Payload',
     })
     .addRetry({
-      errors: ['AccountNotFoundException', 'DuplicateTransactionException', 'InsufficientBalanceException', 'InvalidOperationException', 'ArgumentException'],
+      errors: ['AccountNotFoundException', 'DuplicateTransactionException', 'InsufficientBalanceException', 'InvalidConnectionStringException', 'InvalidAmountType'],
       maxAttempts: 0,
     })
     .addRetry({
@@ -159,11 +252,72 @@ export class CdkStack extends cdk.Stack {
       interval: cdk.Duration.seconds(2),
       errors: ['States.ALL'],
     })
-    .addCatch(failTask, {
-      resultPath: '$.error',
+    .addCatch(failTransactionTask, {
+      resultPath: '$.errorInfo',
+    });
+
+    const processTransactionTask = new tasks.LambdaInvoke(this, 'Process Transaction Task', {
+      lambdaFunction: processTransactionFunctionArn,
+      inputPath: '$[0]',
+      outputPath: '$.Payload',
+    })
+    .addRetry({
+      maxAttempts: 3,
+      backoffRate: 2.0,
+      interval: cdk.Duration.seconds(2),
+      errors: ['States.ALL'],
+    })
+    .addCatch(failTransactionTask, {
+      resultPath: '$[0].errorInfo',
+    });
+
+    const refundSenderWalletBalanceTask = new tasks.LambdaInvoke(this, 'Refund Sender Wallet Balance Task', {
+      lambdaFunction: refundSenderWalletBalanceFunctionArn,
+      outputPath: '$.Payload',
+    })
+    .addRetry({
+      errors: ['AccountNotFoundException', 'DuplicateTransactionException', 'InvalidConnectionStringException', 'InvalidAmountType'],
+      maxAttempts: 0,
+    })
+    .addRetry({
+      maxAttempts: 3,
+      backoffRate: 2.0,
+      interval: cdk.Duration.seconds(2),
+      errors: ['States.ALL'],
+    }).next(failTransactionTask);
+
+    const creditReceiverWalletBalanceTask = new tasks.LambdaInvoke(this, 'Credit Receiver Wallet Balance Task', {
+      lambdaFunction: creditReceiverWalletBalanceFunctionArn,
+      outputPath: '$.Payload',
+    })
+    .addRetry({
+      errors: ['AccountNotFoundException', 'DuplicateTransactionException', 'InvalidConnectionStringException', 'InvalidAmountType'],
+      maxAttempts: 0,
+    })
+    .addRetry({
+      maxAttempts: 3,
+      backoffRate: 2.0,
+      interval: cdk.Duration.seconds(2),
+      errors: ['States.ALL'],
+    })
+    .addCatch(refundSenderWalletBalanceTask, {
+      resultPath: '$.errorInfo',
+    });
+
+    const successTransactionTask = new tasks.LambdaInvoke(this, 'Success Transaction Task', {
+      lambdaFunction: successTransactionFunctionArn,
+      outputPath: '$.Payload',
+    })
+    .addRetry({
+      maxAttempts: 3,
+      backoffRate: 2.0,
+      interval: cdk.Duration.seconds(2),
+      errors: ['States.ALL'],
     });
     
-    const definition = debitSenderWalletBalanceTask;
+    const definition = processTransactionTask.next(
+      debitSenderWalletBalanceTask.next(
+        creditReceiverWalletBalanceTask.next(successTransactionTask)));
 
     const transactionSaga =new sfn.StateMachine(this, "EwalletTransactionSagaOrchestration", {
       definitionBody: sfn.DefinitionBody.fromChainable(definition),
