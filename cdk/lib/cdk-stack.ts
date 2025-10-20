@@ -204,6 +204,25 @@ export class CdkStack extends cdk.Stack {
       refundSenderWalletBalanceFunction.functionArn
     );
 
+    const reverseReceiverCreditFunction = new dotnet.DotNetFunction(this, 'ReverseReceiverCreditFunction', {
+      projectDir: '../src/Ewallet.ReverseReceiverCreditFunction',
+      runtime: lambda.Runtime.PROVIDED_AL2023,
+      bundling: {
+        msbuildParameters: ['/p:PublishAot=true'],
+      },
+      vpc: vpc,
+      architecture: lambda.Architecture.X86_64,
+      memorySize: 512,
+      environment: {
+        DB_CONNECTION_STRING: dbConnectionString,
+      },
+    });
+    const reverseReceiverCreditFunctionArn = lambda.Function.fromFunctionArn(
+      this,
+      'ReverseReceiverCreditFunctionArn',
+      reverseReceiverCreditFunction.functionArn
+    );
+
     const failTransactionFunction = new dotnet.DotNetFunction(this, 'FailTransactionFunction', {
       projectDir: '../src/Ewallet.FailTransactionFunction',
       runtime: lambda.Runtime.PROVIDED_AL2023,
@@ -286,6 +305,21 @@ export class CdkStack extends cdk.Stack {
       errors: ['States.ALL'],
     }).next(failTransactionTask);
 
+    const reverseReceiverCreditTask = new tasks.LambdaInvoke(this, 'Reverse Receiver Credit Task', {
+      lambdaFunction: reverseReceiverCreditFunctionArn,
+      outputPath: '$.Payload',
+    })
+    .addRetry({
+      errors: ['AccountNotFoundException', 'DuplicateTransactionException', 'InvalidConnectionStringException', 'InvalidAmountType'],
+      maxAttempts: 0,
+    })
+    .addRetry({
+      maxAttempts: 3,
+      backoffRate: 2.0,
+      interval: cdk.Duration.seconds(2),
+      errors: ['States.ALL'],
+    }).next(refundSenderWalletBalanceTask);
+
     const creditReceiverWalletBalanceTask = new tasks.LambdaInvoke(this, 'Credit Receiver Wallet Balance Task', {
       lambdaFunction: creditReceiverWalletBalanceFunctionArn,
       outputPath: '$.Payload',
@@ -313,8 +347,10 @@ export class CdkStack extends cdk.Stack {
       backoffRate: 2.0,
       interval: cdk.Duration.seconds(2),
       errors: ['States.ALL'],
+    }).addCatch(reverseReceiverCreditTask, {
+      resultPath: '$.errorInfo',
     });
-    
+
     const definition = processTransactionTask.next(
       debitSenderWalletBalanceTask.next(
         creditReceiverWalletBalanceTask.next(successTransactionTask)));

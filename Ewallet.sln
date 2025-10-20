@@ -21,6 +21,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ewallet.ProcessTransactionF
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ewallet.SuccessTransactionFunction", "src\Ewallet.SuccessTransactionFunction\Ewallet.SuccessTransactionFunction.csproj", "{C444883E-7089-4EA8-AACC-CC04DADC142F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ewallet.ReverseReceiverCreditFunction", "src\Ewallet.ReverseReceiverCreditFunction\Ewallet.ReverseReceiverCreditFunction.csproj", "{1310394F-AB11-4512-B616-D8E44C9EAFA8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -115,6 +117,18 @@ Global
 		{C444883E-7089-4EA8-AACC-CC04DADC142F}.Release|x64.Build.0 = Release|Any CPU
 		{C444883E-7089-4EA8-AACC-CC04DADC142F}.Release|x86.ActiveCfg = Release|Any CPU
 		{C444883E-7089-4EA8-AACC-CC04DADC142F}.Release|x86.Build.0 = Release|Any CPU
+		{1310394F-AB11-4512-B616-D8E44C9EAFA8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1310394F-AB11-4512-B616-D8E44C9EAFA8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1310394F-AB11-4512-B616-D8E44C9EAFA8}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{1310394F-AB11-4512-B616-D8E44C9EAFA8}.Debug|x64.Build.0 = Debug|Any CPU
+		{1310394F-AB11-4512-B616-D8E44C9EAFA8}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{1310394F-AB11-4512-B616-D8E44C9EAFA8}.Debug|x86.Build.0 = Debug|Any CPU
+		{1310394F-AB11-4512-B616-D8E44C9EAFA8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1310394F-AB11-4512-B616-D8E44C9EAFA8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1310394F-AB11-4512-B616-D8E44C9EAFA8}.Release|x64.ActiveCfg = Release|Any CPU
+		{1310394F-AB11-4512-B616-D8E44C9EAFA8}.Release|x64.Build.0 = Release|Any CPU
+		{1310394F-AB11-4512-B616-D8E44C9EAFA8}.Release|x86.ActiveCfg = Release|Any CPU
+		{1310394F-AB11-4512-B616-D8E44C9EAFA8}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -127,6 +141,7 @@ Global
 		{F68C59FC-CA84-4ECB-B916-F72816CE14DD} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{55A6DE01-F1FB-492B-857E-D1A6578454A2} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{C444883E-7089-4EA8-AACC-CC04DADC142F} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{1310394F-AB11-4512-B616-D8E44C9EAFA8} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {FE220BAA-A190-4472-9004-31F8EB24EC0F}
